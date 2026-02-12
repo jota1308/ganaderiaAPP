@@ -341,13 +341,13 @@ vender copias del Software...
 
 ### Desarrollador Principal
 - **GitHub:** [@jota1308](https://github.com/jota1308)
-- **Email:** contacto@ganaderoapp.com
-- **LinkedIn:** [GanaderoApp](https://linkedin.com/company/ganaderoapp)
+- **Email:** *(próximamente)*
+- **LinkedIn:***(próximamente)*
 
 ### Para Consultas
 
-- 💼 **Inversores:** inversiones@ganaderoapp.com
-- 🤝 **Partnerships:** partnerships@ganaderoapp.com
+- 💼 **Inversores:** *(próximamente)*
+- 🤝 **Partnerships:** *(próximamente)*
 - 🐛 **Bugs/Issues:** [GitHub Issues](https://github.com/jota1308/ganaderiaAPP/issues)
 - 💡 **Feature Requests:** [GitHub Discussions](https://github.com/jota1308/ganaderiaAPP/discussions)
 
