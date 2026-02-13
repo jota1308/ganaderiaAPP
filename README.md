@@ -16,6 +16,7 @@
 - [Instalación](#-instalación)
 - [Tecnologías](#-tecnologías)
 - [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Estructura actual del proyecto](#-estructura-actual-del-proyecto)
 - [Documentación](#-documentación)
 - [Roadmap](#️-roadmap)
 - [Contribuir](#-contribuir)
@@ -84,15 +85,13 @@ cd ganaderiaAPP
 
 **Terminal 1 - Backend:**
 ```bash
-cd backend
 npm install
 node server.js
 ```
 
 **Terminal 2 - Dashboard Web:**
 ```bash
-cd web
-npx http-server -p 8080
+npx http-server . -p 8080
 ```
 
 **Abre tu navegador en:** `http://localhost:8080`
@@ -129,7 +128,6 @@ cd ganaderiaAPP
 ### Backend
 
 ```bash
-cd backend
 npm install
 npm start
 ```
@@ -139,9 +137,9 @@ El backend estará corriendo en `http://localhost:3001`
 ### Dashboard Web
 
 ```bash
-cd web
+# Desde la raíz del repo
 # Opción 1: Usar http-server (recomendado)
-npx http-server -p 8080
+npx http-server . -p 8080
 
 # Opción 2: Abrir directamente
 # Doble clic en index.html
@@ -152,9 +150,9 @@ El dashboard estará disponible en `http://localhost:8080`
 ### App Móvil (React Native)
 
 ```bash
-cd mobile
-npm install
+Archivo base disponible en la raíz: `App.js`
 
+# Para correr React Native, inicializá un proyecto RN y copiá App.js
 # iOS
 npx react-native run-ios
 
@@ -192,24 +190,38 @@ npx react-native run-android
 
 ```
 ganaderiaAPP/
-├── 📱 mobile/              # App React Native
-│   └── App.js              # Componente principal
-├── 🌐 web/                 # Dashboard Web React
-│   └── index.html          # Single-page application
-├── 🔧 backend/             # API Node.js
-│   ├── server.js           # Servidor Express
-│   └── package.json        # Dependencias
-├── 📚 docs/                # Documentación
-│   ├── API_DOCS.md         # Documentación de la API
-│   ├── INTEGRACION_RFID.md # Guía de hardware Bluetooth
-│   ├── PLAN_COMERCIAL.md   # Plan de negocios
-│   └── TUTORIAL_VISUAL.md  # Guía paso a paso
-├── 🚀 start.sh             # Script de inicio rápido
-├── 📖 README.md            # Este archivo
-└── .gitignore              # Archivos ignorados por Git
+├── server.js               # API backend (Node + Express)
+├── package.json            # Dependencias/scripts del backend
+├── index.html              # Dashboard web estático
+├── App.js                  # App móvil (React Native)
+├── backend/
+│   └── data/               # Persistencia SQLite compartida
+├── start.sh                # Script de inicio local
+├── docker-compose.yml      # Orquestación de servicios
+└── *.md                    # Documentación del proyecto
 ```
 
 ---
+
+## 🗂️ Estructura actual del proyecto
+
+**Estructura oficial acordada:** **raíz única** (no monorepo con `backend/` y `web/` como código fuente).
+
+- El backend se ejecuta desde la raíz (`server.js` + `package.json`).
+- El frontend web también vive en raíz (`index.html`) y se sirve estático.
+- La persistencia SQLite se mantiene en `backend/data/`.
+- `start.sh` y `docker-compose.yml` ya usan estas rutas reales.
+
+Comandos ejecutables tal cual:
+
+```bash
+# Backend (desde la raíz del repo)
+npm install
+npm start
+
+# Frontend web (desde la raíz del repo)
+npx http-server . -p 8080
+```
 
 ## 📚 Documentación
 
@@ -403,6 +415,7 @@ Ayuda a que más productores ganaderos descubran esta herramienta.
 - [Instalación](#-instalación)
 - [Tecnologías](#-tecnologías)
 - [Estructura del Proyecto](#-estructura-del-proyecto)
+- [Estructura actual del proyecto](#-estructura-actual-del-proyecto)
 - [Documentación](#-documentación)
 - [Roadmap](#️-roadmap)
 - [Contribuir](#-contribuir)
@@ -471,15 +484,13 @@ cd ganaderiaAPP
 
 **Terminal 1 - Backend:**
 ```bash
-cd backend
 npm install
 node server.js
 ```
 
 **Terminal 2 - Dashboard Web:**
 ```bash
-cd web
-npx http-server -p 8080
+npx http-server . -p 8080
 ```
 
 **Abre tu navegador en:** `http://localhost:8080`
@@ -516,7 +527,6 @@ cd ganaderiaAPP
 ### Backend
 
 ```bash
-cd backend
 npm install
 npm start
 ```
@@ -526,9 +536,9 @@ El backend estará corriendo en `http://localhost:3001`
 ### Dashboard Web
 
 ```bash
-cd web
+# Desde la raíz del repo
 # Opción 1: Usar http-server (recomendado)
-npx http-server -p 8080
+npx http-server . -p 8080
 
 # Opción 2: Abrir directamente
 # Doble clic en index.html
@@ -539,9 +549,9 @@ El dashboard estará disponible en `http://localhost:8080`
 ### App Móvil (React Native)
 
 ```bash
-cd mobile
-npm install
+Archivo base disponible en la raíz: `App.js`
 
+# Para correr React Native, inicializá un proyecto RN y copiá App.js
 # iOS
 npx react-native run-ios
 
@@ -579,24 +589,38 @@ npx react-native run-android
 
 ```
 ganaderiaAPP/
-├── 📱 mobile/              # App React Native
-│   └── App.js              # Componente principal
-├── 🌐 web/                 # Dashboard Web React
-│   └── index.html          # Single-page application
-├── 🔧 backend/             # API Node.js
-│   ├── server.js           # Servidor Express
-│   └── package.json        # Dependencias
-├── 📚 docs/                # Documentación
-│   ├── API_DOCS.md         # Documentación de la API
-│   ├── INTEGRACION_RFID.md # Guía de hardware Bluetooth
-│   ├── PLAN_COMERCIAL.md   # Plan de negocios
-│   └── TUTORIAL_VISUAL.md  # Guía paso a paso
-├── 🚀 start.sh             # Script de inicio rápido
-├── 📖 README.md            # Este archivo
-└── .gitignore              # Archivos ignorados por Git
+├── server.js               # API backend (Node + Express)
+├── package.json            # Dependencias/scripts del backend
+├── index.html              # Dashboard web estático
+├── App.js                  # App móvil (React Native)
+├── backend/
+│   └── data/               # Persistencia SQLite compartida
+├── start.sh                # Script de inicio local
+├── docker-compose.yml      # Orquestación de servicios
+└── *.md                    # Documentación del proyecto
 ```
 
 ---
+
+## 🗂️ Estructura actual del proyecto
+
+**Estructura oficial acordada:** **raíz única** (no monorepo con `backend/` y `web/` como código fuente).
+
+- El backend se ejecuta desde la raíz (`server.js` + `package.json`).
+- El frontend web también vive en raíz (`index.html`) y se sirve estático.
+- La persistencia SQLite se mantiene en `backend/data/`.
+- `start.sh` y `docker-compose.yml` ya usan estas rutas reales.
+
+Comandos ejecutables tal cual:
+
+```bash
+# Backend (desde la raíz del repo)
+npm install
+npm start
+
+# Frontend web (desde la raíz del repo)
+npx http-server . -p 8080
+```
 
 ## 📚 Documentación
 

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -e
+
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
 echo "🐄 GanaderoApp - Iniciando sistema completo..."
 echo ""
 
@@ -19,9 +24,8 @@ fi
 echo "${GREEN}✓ Node.js instalado: $(node --version)${NC}"
 echo ""
 
-# Instalar dependencias del backend
+# Instalar dependencias del backend (en la raíz del repo)
 echo "${BLUE}📦 Instalando dependencias del backend...${NC}"
-cd backend
 if [ ! -d "node_modules" ]; then
     npm install
 else
@@ -55,8 +59,7 @@ then
     npm install -g http-server
 fi
 
-cd ../web
-http-server -p 8080 &
+http-server "$ROOT_DIR" -p 8080 &
 WEB_PID=$!
 
 sleep 2

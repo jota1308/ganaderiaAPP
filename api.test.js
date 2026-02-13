@@ -1,9 +1,17 @@
 const request = require('supertest');
-const app = require('../server');
+const app = require('./server');
 
 describe('GanaderoApp API Tests', () => {
   let authToken;
   let testAnimalId;
+
+  afterAll((done) => {
+    if (app.db) {
+      app.db.close(done);
+      return;
+    }
+    done();
+  });
 
   // ==================== TESTS DE AUTENTICACIÓN ====================
   
