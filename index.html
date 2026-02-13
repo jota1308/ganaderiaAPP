@@ -874,7 +874,7 @@
                   <AnimalesTab animales={animales} onSelectAnimal={(id) => setSelectedAnimalId(id)} getAnimalImage={getAnimalImage} />
                 )}
                 {activeTab === 'lotes' && (
-                  <LotesTab lotes={lotesConAnimales} onSelectLote={(id) => setSelectedLoteId(id)} getAnimalImage={getAnimalImage} />
+                  <LotesTab lotes={lotesConAnimales} onSelectLote={(id) => setSelectedLoteId(id)} token={token} onRefresh={cargarDatos} getAnimalImage={getAnimalImage} />
                 )}
                 {activeTab === 'tratamientos' && (
                   <TratamientosTab tratamientos={tratamientosTodos} tratamientosPendientes={tratamientosPendientes} />
@@ -1611,12 +1611,75 @@
     }
 
     // ==================== TAB LOTES ====================
-    function LotesTab({ lotes, onSelectLote }) {
-      if (!lotes || lotes.length === 0) {
+    function LotesTab({ lotes, onSelectLote, token, onRefresh }) {
+      const [creando, setCreando] = useState(false);
+      const [loteExpandidoId, setLoteExpandidoId] = useState(null);
+
+      const lotesOrdenados = useMemo(() => {
+        return [...(lotes || [])].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' }));
+      }, [lotes]);
+
+      const crearLote = async () => {
+        const nombre = window.prompt('Nombre del lote');
+        if (!nombre || !nombre.trim()) return;
+
+        setCreando(true);
+        try {
+          const res = await fetch(`${API_URL}/lotes`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ nombre: nombre.trim() }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            alert(data.error || 'No se pudo crear el lote');
+            return;
+          }
+
+          setLoteExpandidoId(data.id);
+          if (onRefresh) await onRefresh();
+        } catch (_error) {
+          alert('Error de conexión al crear lote');
+        } finally {
+          setCreando(false);
+        }
+      };
+
+      const exportarLote = async (lote) => {
+        try {
+          const res = await fetch(`${API_URL}/lotes/${lote.id}/export/excel`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            alert(body.error || 'No se pudo exportar lote');
+            return;
+          }
+          const blob = await res.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `lote_${(lote.nombre || lote.id).replace(/\s+/g, '_')}.xlsx`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+        } catch (_error) {
+          alert('Error de conexión al exportar lote');
+        }
+      };
+
+      if (!lotesOrdenados || lotesOrdenados.length === 0) {
         return (
           <div className="empty-state">
             <h2>No hay lotes</h2>
-            <p>Crea un lote al cargar un animal o desde Ajustes.</p>
+            <p>Crea un lote para empezar a organizar tus animales.</p>
+            <div style={{ marginTop: 16 }}>
+              <button type="button" className="btn btn-primary" style={{ width: 'auto' }} disabled={creando} onClick={crearLote}>
+                {creando ? 'Creando...' : '+ Crear lote'}
+              </button>
+            </div>
           </div>
         );
       }
@@ -1624,55 +1687,80 @@
       return (
         <>
           <div className="section-header">
-            <h2 className="section-title">Lotes ({lotes.length})</h2>
+            <h2 className="section-title">Lotes ({lotesOrdenados.length})</h2>
+            <button type="button" className="btn btn-primary" style={{ width: 'auto' }} disabled={creando} onClick={crearLote}>
+              {creando ? 'Creando...' : '+ Crear lote'}
+            </button>
           </div>
-          <p style={{ color: '#666', marginBottom: 20 }}>Cada lote se muestra como una tabla con sus animales asociados.</p>
+          <p style={{ color: '#666', marginBottom: 20 }}>Vista completa de lotes: resumen, animales, exportación SENASA y acceso al detalle.</p>
 
           <div style={{ display: 'grid', gap: 16 }}>
-            {lotes.map((l) => {
+            {lotesOrdenados.map((l) => {
               const animalesLote = l.animales || [];
+              const expanded = String(loteExpandidoId) === String(l.id);
+              const gdp = animalesLote
+                .map((a) => Number(a.gdp))
+                .filter((v) => Number.isFinite(v));
+              const gdpPromedio = gdp.length ? (gdp.reduce((acc, value) => acc + value, 0) / gdp.length).toFixed(2) : 'N/A';
+
               return (
                 <div key={l.id} className="chart-container" style={{ marginBottom: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
-                    <div>
-                      <div className="chart-title" style={{ marginBottom: 4 }}>{l.nombre}</div>
-                      <div style={{ fontSize: 14, color: '#666' }}>{animalesLote.length} animales · {l.ubicacion || '—'}</div>
-                    </div>
-                    <button type="button" className="btn btn-secondary" onClick={() => onSelectLote && onSelectLote(l.id)}>Ver detalle del lote</button>
-                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ width: '100%', textAlign: 'left', display: 'block', marginBottom: 12 }}
+                    onClick={() => setLoteExpandidoId(expanded ? null : l.id)}
+                  >
+                    <strong>{l.nombre}</strong> · CC: {animalesLote.length} · GDP: {gdpPromedio}
+                  </button>
 
-                  <div className="table-container">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Perfil</th>
-                          <th>Caravana</th>
-                          <th>Raza</th>
-                          <th>Sexo</th>
-                          <th>Peso actual</th>
-                          <th>Estado</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {animalesLote.length === 0 ? (
-                          <tr>
-                            <td colSpan="6" style={{ color: '#777' }}>Sin animales asignados a este lote.</td>
-                          </tr>
-                        ) : (
-                          animalesLote.map((a) => (
-                            <tr key={a.id}>
-                              <td>{a.nombre || 'Sin nombre'}</td>
-                              <td>{a.caravana}</td>
-                              <td>{a.raza || '—'}</td>
-                              <td>{a.sexo === 'hembra' ? 'Hembra' : 'Macho'}</td>
-                              <td>{a.peso_actual || '—'} kg</td>
-                              <td>{a.estado || 'activo'}</td>
+                  {expanded && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+                        <div style={{ fontSize: 14, color: '#666' }}>Ubicación: {l.ubicacion || '—'} · Estado: {l.estado || 'activo'}</div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button type="button" className="btn btn-secondary" onClick={() => exportarLote(l)}>Excel SENASA</button>
+                          <button type="button" className="btn btn-secondary" onClick={() => onSelectLote && onSelectLote(l.id)}>Ver detalle del lote</button>
+                        </div>
+                      </div>
+
+                      <div className="table-container">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Perfil</th>
+                              <th>Caravana</th>
+                              <th>Raza</th>
+                              <th>Sexo</th>
+                              <th>Peso actual</th>
+                              <th>Estado</th>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                          </thead>
+                          <tbody>
+                            {animalesLote.length === 0 ? (
+                              <tr>
+                                <td colSpan="6" style={{ color: '#777' }}>Sin animales asignados a este lote.</td>
+                              </tr>
+                            ) : (
+                              animalesLote
+                                .slice()
+                                .sort((a, b) => (a.caravana || '').localeCompare(b.caravana || '', 'es', { numeric: true, sensitivity: 'base' }))
+                                .map((a) => (
+                                  <tr key={a.id}>
+                                    <td>{a.nombre || 'Sin nombre'}</td>
+                                    <td>{a.caravana}</td>
+                                    <td>{a.raza || '—'}</td>
+                                    <td>{a.sexo === 'hembra' ? 'Hembra' : 'Macho'}</td>
+                                    <td>{a.peso_actual || '—'} kg</td>
+                                    <td>{a.estado || 'activo'}</td>
+                                  </tr>
+                                ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })}
