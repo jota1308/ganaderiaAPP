@@ -558,7 +558,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     const API_URL = 'http://localhost:3001/api';
 
@@ -679,6 +679,29 @@
       const [loading, setLoading] = useState(false);
       const [selectedAnimalId, setSelectedAnimalId] = useState(null);
       const [selectedLoteId, setSelectedLoteId] = useState(null);
+
+      const lotesConAnimales = useMemo(() => {
+        const lotesBase = (lotes || []).map((l) => ({ ...l, animales: Array.isArray(l.animales) ? l.animales : [] }));
+        const byId = new Map(lotesBase.map((l) => [String(l.id), l]));
+
+        (animales || []).forEach((animal) => {
+          if (animal.lote_id == null) return;
+          const key = String(animal.lote_id);
+          const actual = byId.get(key) || {
+            id: animal.lote_id,
+            nombre: animal.lote_nombre || `Lote ${animal.lote_id}`,
+            ubicacion: '',
+            cantidad_animales: 0,
+            animales: [],
+          };
+          if (!byId.has(key)) byId.set(key, actual);
+          const yaIncluido = actual.animales.some((a) => String(a.id) === String(animal.id));
+          if (!yaIncluido) actual.animales.push(animal);
+          actual.cantidad_animales = actual.animales.length;
+        });
+
+        return Array.from(byId.values()).sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')));
+      }, [lotes, animales]);
 
       useEffect(() => {
         cargarDatos();
@@ -801,6 +824,7 @@
                   token={token}
                   onBack={() => setSelectedAnimalId(null)}
                   onRefresh={cargarDatos}
+                  lotes={lotesConAnimales}
                 />
               </>
             ) : selectedLoteId ? (
@@ -813,6 +837,7 @@
                   token={token}
                   onBack={() => setSelectedLoteId(null)}
                   onSelectAnimal={(id) => setSelectedAnimalId(id)}
+                  animales={animales}
                   getAnimalImage={getAnimalImage}
                 />
               </>
@@ -841,13 +866,13 @@
                   <AnimalesTab animales={animales} onSelectAnimal={(id) => setSelectedAnimalId(id)} getAnimalImage={getAnimalImage} />
                 )}
                 {activeTab === 'lotes' && (
-                  <LotesTab lotes={lotes} onSelectLote={(id) => setSelectedLoteId(id)} getAnimalImage={getAnimalImage} />
+                  <LotesTab lotes={lotesConAnimales} onSelectLote={(id) => setSelectedLoteId(id)} getAnimalImage={getAnimalImage} />
                 )}
                 {activeTab === 'tratamientos' && (
                   <TratamientosTab tratamientos={tratamientosTodos} tratamientosPendientes={tratamientosPendientes} />
                 )}
                 {activeTab === 'reportes' && (
-                  <ReportesTab dashboard={dashboard} animales={animales} lotes={lotes} onSelectLote={(id) => setSelectedLoteId(id)} />
+                  <ReportesTab dashboard={dashboard} animales={animales} lotes={lotesConAnimales} onSelectLote={(id) => setSelectedLoteId(id)} />
                 )}
                 {activeTab === 'ajustes' && (
                   <AjustesTab usuario={usuario} token={token} lotes={lotes} onRefresh={cargarDatos} />
@@ -1049,7 +1074,7 @@
     }
 
     // ==================== PERFIL DE ANIMAL ====================
-    function AnimalProfile({ animalId, token, onBack, onRefresh }) {
+    function AnimalProfile({ animalId, token, onBack, onRefresh, lotes }) {
       const [animal, setAnimal] = useState(null);
       const [loading, setLoading] = useState(true);
       const [fotoUrlEdit, setFotoUrlEdit] = useState('');
@@ -1223,7 +1248,7 @@
               <h2 style={{ fontSize: 24, marginBottom: 8 }}>{animal.nombre || 'Sin nombre'}</h2>
               <p style={{ color: '#666', marginBottom: 4 }}>Caravana: {animal.caravana}</p>
               <p style={{ color: '#666', marginBottom: 4 }}>Raza: {animal.raza || '—'} · Sexo: {animal.sexo === 'hembra' ? 'Hembra' : 'Macho'}</p>
-              <p style={{ color: '#666', marginBottom: 4 }}>Potrero: {animal.potrero || '—'} · Lote: {animal.lote_nombre || '—'}</p>
+              <p style={{ color: '#666', marginBottom: 4 }}>Potrero: {animal.potrero || '—'} · Lote: {(lotes || []).find((l) => String(l.id) === String(animal.lote_id))?.nombre || animal.lote_nombre || '—'}</p>
               <p style={{ fontSize: 18, fontWeight: 600, color: '#2e7d32', marginTop: 8 }}>Peso actual: {animal.peso_actual || '—'} kg</p>
             </div>
           </div>
@@ -1352,7 +1377,7 @@
     }
 
     // ==================== DETALLE DE LOTE ====================
-    function LoteDetail({ loteId, token, onBack, onSelectAnimal, getAnimalImage }) {
+    function LoteDetail({ loteId, token, onBack, onSelectAnimal, animales, getAnimalImage }) {
       const [lote, setLote] = useState(null);
       const [loading, setLoading] = useState(true);
 
@@ -1379,14 +1404,19 @@
         );
       }
 
+      const animalesDelLote = (lote.animales && lote.animales.length > 0)
+        ? lote.animales
+        : (animales || []).filter((a) => String(a.lote_id) === String(loteId));
+      const cantidadAnimales = animalesDelLote.length > 0 ? animalesDelLote.length : (lote.cantidad_animales ?? 0);
+
       return (
         <div>
           <h2 style={{ fontSize: 24, marginBottom: 8 }}>{lote.nombre}</h2>
-          <p style={{ color: '#666', marginBottom: 24 }}>{lote.ubicacion || '—'} · {lote.cantidad_animales ?? 0} animales</p>
+          <p style={{ color: '#666', marginBottom: 24 }}>{lote.ubicacion || '—'} · {cantidadAnimales} animales</p>
 
-          {lote.animales && lote.animales.length > 0 ? (
+          {animalesDelLote.length > 0 ? (
             <div className="animals-grid">
-              {lote.animales.map((animal) => (
+              {animalesDelLote.map((animal) => (
                 <div key={animal.id} className="animal-card" onClick={() => onSelectAnimal(animal.id)} style={{ cursor: 'pointer' }}>
                   <div className="animal-card-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1863,6 +1893,16 @@
           {onSelectLote && lotes?.length > 0 && (
             <p style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Haz clic en una fila para ver el listado de animales del lote.</p>
           )}
+
+          <div className="chart-container">
+            <div className="chart-title">Funciones Python</div>
+            <p style={{ color: '#666', marginBottom: 12 }}>Accesos rápidos a las utilidades Python solicitadas.</p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: análisis de crecimiento (pendiente de integración de endpoint).')}>🐍 Análisis de crecimiento</button>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: proyección de peso (pendiente de integración de endpoint).')}>🐍 Proyección de peso</button>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: reporte avanzado (pendiente de integración de endpoint).')}>🐍 Reporte avanzado</button>
+            </div>
+          </div>
         </>
       );
     }

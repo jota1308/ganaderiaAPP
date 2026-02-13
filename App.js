@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -270,6 +270,8 @@ const AnimalCard = ({ animal, token }) => {
     return diffDias > 0 ? (diffPeso / diffDias).toFixed(3) : null;
   };
 
+  const gananciaDiaria = useMemo(() => calcularGananciaDiaria(), [detalle]);
+
   return (
     <TouchableOpacity
       style={styles.animalCard}
@@ -298,9 +300,9 @@ const AnimalCard = ({ animal, token }) => {
             Fecha: {formatearFecha(detalle.fecha_ultimo_peso) || 'No registrado'}
           </Text>
           
-          {calcularGananciaDiaria() && (
+          {gananciaDiaria && (
             <Text style={styles.gananciaText}>
-              Ganancia diaria: {calcularGananciaDiaria()} kg/día
+              Ganancia diaria: {gananciaDiaria} kg/día
             </Text>
           )}
 
