@@ -562,6 +562,17 @@
 
     const API_URL = 'http://localhost:3001/api';
 
+    async function apiFetch(path, options = {}) {
+      const response = await fetch(`${API_URL}${path}`, options);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload.error || `Error HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return payload;
+    }
+
     // Fotos genéricas por tipo/raza (realistas). Si el animal tiene foto_url se usa esa.
     const DEFAULT_IMAGES = {
       hembra: 'https://images.unsplash.com/photo-1546445317-29f4545e9d53?w=400&h=300&fit=crop',
@@ -677,6 +688,7 @@
       const [busquedasRecientes, setBusquedasRecientes] = useState([]);
       const [lotes, setLotes] = useState([]);
       const [loading, setLoading] = useState(false);
+      const [integrationError, setIntegrationError] = useState('');
       const [selectedAnimalId, setSelectedAnimalId] = useState(null);
       const [selectedLoteId, setSelectedLoteId] = useState(null);
 
@@ -686,24 +698,17 @@
 
       const cargarDatos = async () => {
         setLoading(true);
+        setIntegrationError('');
 
         try {
-          const [resAnimales, resDashboard, resTratamientosPend, resTratamientosTodos, resBusquedas, resLotes] = await Promise.all([
-            fetch(`${API_URL}/animales`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API_URL}/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API_URL}/tratamientos/pendientes`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API_URL}/tratamientos`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API_URL}/busquedas-recientes`, { headers: { Authorization: `Bearer ${token}` } }),
-            fetch(`${API_URL}/lotes`, { headers: { Authorization: `Bearer ${token}` } }),
-          ]);
-
+          const headers = { Authorization: `Bearer ${token}` };
           const [dataAnimales, dataDashboard, dataPendientes, dataTratamientosTodos, dataBusquedas, dataLotes] = await Promise.all([
-            resAnimales.json(),
-            resDashboard.json(),
-            resTratamientosPend.json(),
-            resTratamientosTodos.json(),
-            resBusquedas.json(),
-            resLotes.json(),
+            apiFetch('/animales', { headers }),
+            apiFetch('/dashboard', { headers }),
+            apiFetch('/tratamientos/pendientes', { headers }),
+            apiFetch('/tratamientos', { headers }),
+            apiFetch('/busquedas-recientes', { headers }),
+            apiFetch('/lotes', { headers }),
           ]);
 
           setAnimales(dataAnimales);
@@ -714,6 +719,7 @@
           setLotes(dataLotes);
         } catch (error) {
           console.error('Error al cargar datos:', error);
+          setIntegrationError(`Error de integración API: ${error.message}`);
         }
 
         setLoading(false);
@@ -739,6 +745,8 @@
               </button>
             </div>
           </div>
+
+          {integrationError && <div style={{ color: '#c62828', marginBottom: 12, fontWeight: 500 }}>{integrationError}</div>}
 
           {/* Navigation */}
           <div className="nav">
@@ -1059,6 +1067,7 @@
       const [enviandoPesaje, setEnviandoPesaje] = useState(false);
       const [enviandoTratamiento, setEnviandoTratamiento] = useState(false);
       const [guardandoFoto, setGuardandoFoto] = useState(false);
+      const [errorApi, setErrorApi] = useState('');
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
 
@@ -1067,13 +1076,12 @@
         (async () => {
           setLoading(true);
           try {
-            const res = await fetch(`${API_URL}/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
-            const data = await res.json();
-            if (!cancelled && res.ok) {
+            const data = await apiFetch(`/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!cancelled) {
               setAnimal(data);
               setFotoUrlEdit(data.foto_url || '');
             }
-          } catch (e) {}
+          } catch (e) { if (!cancelled) setErrorApi(`Error de integración API: ${e.message}`); }
           if (!cancelled) setLoading(false);
         })();
         return () => { cancelled = true; };
@@ -1117,8 +1125,9 @@
       const guardarFoto = async (e) => {
         e.preventDefault();
         setGuardandoFoto(true);
+        setErrorApi('');
         try {
-          const res = await fetch(`${API_URL}/animales/${animalId}`, {
+          await apiFetch(`/animales/${animalId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({
@@ -1130,12 +1139,10 @@
               foto_url: fotoUrlEdit || null,
             }),
           });
-          if (res.ok) {
-            setAnimal(a => ({ ...a, foto_url: fotoUrlEdit || null }));
-            setShowFotoForm(false);
-            onRefresh();
-          }
-        } catch (e) {}
+          setAnimal(a => ({ ...a, foto_url: fotoUrlEdit || null }));
+          setShowFotoForm(false);
+          onRefresh();
+        } catch (e) { setErrorApi(`Error de integración API: ${e.message}`); }
         setGuardandoFoto(false);
       };
 
@@ -1143,8 +1150,9 @@
         e.preventDefault();
         if (!formPesaje.peso) return;
         setEnviandoPesaje(true);
+        setErrorApi('');
         try {
-          const res = await fetch(`${API_URL}/pesajes`, {
+          await apiFetch('/pesajes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({
@@ -1154,14 +1162,11 @@
               notas: formPesaje.notas || null,
             }),
           });
-          if (res.ok) {
-            setFormPesaje({ peso: '', fecha: new Date().toISOString().split('T')[0], notas: '' });
-            const r = await fetch(`${API_URL}/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
-            const data = await r.json();
-            if (r.ok) setAnimal(data);
-            onRefresh();
-          }
-        } catch (e) {}
+          setFormPesaje({ peso: '', fecha: new Date().toISOString().split('T')[0], notas: '' });
+          const data = await apiFetch(`/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
+          setAnimal(data);
+          onRefresh();
+        } catch (e) { setErrorApi(`Error de integración API: ${e.message}`); }
         setEnviandoPesaje(false);
       };
 
@@ -1169,8 +1174,9 @@
         e.preventDefault();
         if (!formTratamiento.descripcion.trim()) return;
         setEnviandoTratamiento(true);
+        setErrorApi('');
         try {
-          const res = await fetch(`${API_URL}/tratamientos`, {
+          await apiFetch('/tratamientos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
             body: JSON.stringify({
@@ -1182,14 +1188,11 @@
               veterinario: formTratamiento.veterinario || null,
             }),
           });
-          if (res.ok) {
-            setFormTratamiento({ tipo: 'vacuna', descripcion: '', fecha: '', proxima_fecha: '', veterinario: '' });
-            const r = await fetch(`${API_URL}/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
-            const data = await r.json();
-            if (r.ok) setAnimal(data);
-            onRefresh();
-          }
-        } catch (e) {}
+          setFormTratamiento({ tipo: 'vacuna', descripcion: '', fecha: '', proxima_fecha: '', veterinario: '' });
+          const data = await apiFetch(`/animales/${animalId}`, { headers: { Authorization: `Bearer ${token}` } });
+          setAnimal(data);
+          onRefresh();
+        } catch (e) { setErrorApi(`Error de integración API: ${e.message}`); }
         setEnviandoTratamiento(false);
       };
 
@@ -1207,6 +1210,7 @@
       return (
         <div>
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 24 }}>
+            {errorApi && <p style={{ color: '#c62828', width: '100%' }}>{errorApi}</p>}
             <div>
               <img src={imgSrc} alt="" className="animal-photo-profile" onError={(e) => { e.target.src = FALLBACK_IMAGE; }} />
               <button type="button" className="btn btn-secondary" style={{ marginTop: 12, width: '100%' }} onClick={() => setShowFotoForm(!showFotoForm)}>
@@ -1355,16 +1359,16 @@
     function LoteDetail({ loteId, token, onBack, onSelectAnimal, getAnimalImage }) {
       const [lote, setLote] = useState(null);
       const [loading, setLoading] = useState(true);
+      const [errorApi, setErrorApi] = useState('');
 
       useEffect(() => {
         let cancelled = false;
         (async () => {
           setLoading(true);
           try {
-            const res = await fetch(`${API_URL}/lotes/${loteId}`, { headers: { Authorization: `Bearer ${token}` } });
-            const data = await res.json();
-            if (!cancelled && res.ok) setLote(data);
-          } catch (e) {}
+            const data = await apiFetch(`/lotes/${loteId}`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!cancelled) setLote(data);
+          } catch (e) { if (!cancelled) setErrorApi(`Error de integración API: ${e.message}`); }
           if (!cancelled) setLoading(false);
         })();
         return () => { cancelled = true; };
@@ -1381,6 +1385,7 @@
 
       return (
         <div>
+          {errorApi && <p style={{ color: '#c62828', marginBottom: 12 }}>{errorApi}</p>}
           <h2 style={{ fontSize: 24, marginBottom: 8 }}>{lote.nombre}</h2>
           <p style={{ color: '#666', marginBottom: 24 }}>{lote.ubicacion || '—'} · {lote.cantidad_animales ?? 0} animales</p>
 

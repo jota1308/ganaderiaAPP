@@ -101,6 +101,36 @@ db.serialize(() => {
     FOREIGN KEY (animal_id) REFERENCES animales(id)
   )`);
 
+  // Tabla de lotes
+  db.run(`CREATE TABLE IF NOT EXISTS lotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    nombre TEXT NOT NULL,
+    ubicacion TEXT,
+    creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+  )`);
+
+  // Historial de búsquedas por caravana
+  db.run(`CREATE TABLE IF NOT EXISTS busquedas_recientes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL,
+    animal_id INTEGER,
+    caravana TEXT NOT NULL,
+    buscado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (animal_id) REFERENCES animales(id)
+  )`);
+
+  // Migración: agregar columna lote_id en animales si no existe
+  db.all(`PRAGMA table_info(animales)`, [], (err, columnas = []) => {
+    if (err) return;
+    const tieneLoteId = columnas.some((col) => col.name === 'lote_id');
+    if (!tieneLoteId) {
+      db.run('ALTER TABLE animales ADD COLUMN lote_id INTEGER REFERENCES lotes(id)');
+    }
+  });
+
   // Verificar si existe usuario demo
   db.get('SELECT id FROM usuarios WHERE email = ?', ['demo@campo.com'], (err, row) => {
     if (!row) {
@@ -120,6 +150,8 @@ db.serialize(() => {
         db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, estado) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, animal);
       });
+
+      db.run(`INSERT INTO lotes (usuario_id, nombre, ubicacion) VALUES (1, 'Lote Demo Norte', 'Sector Norte')`);
 
       // Crear pesajes demo
       db.run(`INSERT INTO pesajes (animal_id, peso, fecha, notas) VALUES (1, 450, '2024-12-01', 'Peso estable')`);
@@ -245,6 +277,8 @@ app.get('/api/animales/caravana/:caravana', verificarToken, (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
       if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
 
+      db.run('INSERT INTO busquedas_recientes (usuario_id, animal_id, caravana) VALUES (?, ?, ?)', [req.usuarioId, animal.id, animal.caravana]);
+
       // Obtener historial completo
       db.all('SELECT * FROM pesajes WHERE animal_id = ? ORDER BY fecha DESC', [animal.id], (err, pesajes) => {
         db.all('SELECT * FROM tratamientos WHERE animal_id = ? ORDER BY fecha DESC', [animal.id], (err2, tratamientos) => {
@@ -262,9 +296,38 @@ app.get('/api/animales/caravana/:caravana', verificarToken, (req, res) => {
   );
 });
 
+// Obtener detalle de un animal
+app.get('/api/animales/:id', verificarToken, (req, res) => {
+  const { id } = req.params;
+  db.get(`SELECT a.*,
+          (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual,
+          (SELECT fecha FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as fecha_ultimo_peso
+          FROM animales a
+          WHERE a.id = ? AND a.usuario_id = ?`,
+    [id, req.usuarioId],
+    (err, animal) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
+
+      db.all('SELECT * FROM pesajes WHERE animal_id = ? ORDER BY fecha DESC', [animal.id], (_errPesajes, pesajes) => {
+        db.all('SELECT * FROM tratamientos WHERE animal_id = ? ORDER BY fecha DESC', [animal.id], (_errTrat, tratamientos) => {
+          db.all('SELECT * FROM eventos_reproductivos WHERE animal_id = ? ORDER BY fecha DESC', [animal.id], (_errEvent, eventos) => {
+            res.json({
+              ...animal,
+              pesajes: pesajes || [],
+              tratamientos: tratamientos || [],
+              eventos_reproductivos: eventos || []
+            });
+          });
+        });
+      });
+    }
+  );
+});
+
 // Crear nuevo animal
 app.post('/api/animales', verificarToken, (req, res) => {
-  const { caravana, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero } = req.body;
+  const { caravana, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, lote_id } = req.body;
 
   if (!caravana) {
     return res.status(400).json({ error: 'La caravana es obligatoria' });
@@ -290,12 +353,13 @@ app.post('/api/animales', verificarToken, (req, res) => {
 // Actualizar animal
 app.put('/api/animales/:id', verificarToken, (req, res) => {
   const { id } = req.params;
-  const { nombre, raza, potrero, estado } = req.body;
+  const { nombre, raza, potrero, estado, foto_url, lote_id } = req.body;
 
-  db.run(`UPDATE animales SET nombre = ?, raza = ?, potrero = ?, estado = ? WHERE id = ? AND usuario_id = ?`,
-    [nombre, raza, potrero, estado, id, req.usuarioId],
-    (err) => {
+  db.run(`UPDATE animales SET nombre = ?, raza = ?, potrero = ?, estado = ?, foto_url = ?, lote_id = ? WHERE id = ? AND usuario_id = ?`,
+    [nombre, raza, potrero, estado, foto_url || null, lote_id || null, id, req.usuarioId],
+    function(err) {
       if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Animal no encontrado' });
       res.json({ mensaje: 'Animal actualizado' });
     }
   );
@@ -375,6 +439,98 @@ app.get('/api/tratamientos/pendientes', verificarToken, (req, res) => {
     (err, tratamientos) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json(tratamientos);
+    }
+  );
+});
+
+// Obtener todos los tratamientos
+app.get('/api/tratamientos', verificarToken, (req, res) => {
+  db.all(`SELECT t.*, a.caravana, a.nombre as animal_nombre
+          FROM tratamientos t
+          JOIN animales a ON t.animal_id = a.id
+          WHERE a.usuario_id = ?
+          ORDER BY t.fecha DESC`,
+    [req.usuarioId],
+    (err, tratamientos) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(tratamientos || []);
+    }
+  );
+});
+
+// Obtener búsquedas recientes
+app.get('/api/busquedas-recientes', verificarToken, (req, res) => {
+  db.all(`SELECT b.id, b.animal_id, b.caravana, b.buscado_en,
+            a.nombre as animal_nombre
+          FROM busquedas_recientes b
+          LEFT JOIN animales a ON b.animal_id = a.id
+          WHERE b.usuario_id = ?
+          ORDER BY b.buscado_en DESC
+          LIMIT 20`,
+    [req.usuarioId],
+    (err, busquedas) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(busquedas || []);
+    }
+  );
+});
+
+// Obtener lotes del usuario
+app.get('/api/lotes', verificarToken, (req, res) => {
+  db.all(`SELECT l.*, COUNT(a.id) as cantidad_animales
+          FROM lotes l
+          LEFT JOIN animales a ON a.lote_id = l.id AND a.usuario_id = l.usuario_id AND a.estado = 'activo'
+          WHERE l.usuario_id = ?
+          GROUP BY l.id
+          ORDER BY l.creado_en DESC`,
+    [req.usuarioId],
+    (err, lotes) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(lotes || []);
+    }
+  );
+});
+
+// Obtener detalle de un lote
+app.get('/api/lotes/:id', verificarToken, (req, res) => {
+  const { id } = req.params;
+  db.get(`SELECT l.*, COUNT(a.id) as cantidad_animales
+          FROM lotes l
+          LEFT JOIN animales a ON a.lote_id = l.id AND a.usuario_id = l.usuario_id AND a.estado = 'activo'
+          WHERE l.id = ? AND l.usuario_id = ?
+          GROUP BY l.id`,
+    [id, req.usuarioId],
+    (err, lote) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
+
+      db.all(`SELECT a.*,
+              (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual
+              FROM animales a
+              WHERE a.usuario_id = ? AND a.lote_id = ? AND a.estado = 'activo'
+              ORDER BY a.creado_en DESC`,
+        [req.usuarioId, id],
+        (_errAnimales, animales) => {
+          res.json({
+            ...lote,
+            animales: animales || []
+          });
+        }
+      );
+    }
+  );
+});
+
+// Crear lote
+app.post('/api/lotes', verificarToken, (req, res) => {
+  const { nombre, ubicacion } = req.body;
+  if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' });
+
+  db.run('INSERT INTO lotes (usuario_id, nombre, ubicacion) VALUES (?, ?, ?)',
+    [req.usuarioId, nombre.trim(), ubicacion || null],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      db.get('SELECT * FROM lotes WHERE id = ?', [this.lastID], (_errLote, lote) => res.json(lote));
     }
   );
 });
