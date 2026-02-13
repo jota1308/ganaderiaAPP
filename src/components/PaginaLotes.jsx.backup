@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { crearLote, exportarLoteExcel, obtenerAnimalesDelLote, obtenerTodosLosLotes } from '../services/lotes';
 import ListadoAnimalesLote from './ListadoAnimalesLote';
 
@@ -13,9 +13,7 @@ const PaginaLotes = () => {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [loteExpandidoId, setLoteExpandidoId] = useState(null);
   const [animalesPorLote, setAnimalesPorLote] = useState({});
-  const [cargandoAnimales, setCargandoAnimales] = useState({});
 
-  // ✅ OPTIMIZACIÓN 1: Solo cargar la lista de lotes al inicio (sin animales)
   useEffect(() => {
     let mounted = true;
 
@@ -24,6 +22,16 @@ const PaginaLotes = () => {
         const data = await obtenerTodosLosLotes();
         if (!mounted) return;
         setLotes(data);
+
+        const animalesResultados = await Promise.all(
+          data.map(async (lote) => {
+            const animales = await obtenerAnimalesDelLote(lote.id);
+            return [lote.id, ordenarPorCaravana(animales)];
+          })
+        );
+
+        if (!mounted) return;
+        setAnimalesPorLote(Object.fromEntries(animalesResultados));
       } catch (err) {
         if (mounted) setError(err);
       }
@@ -36,47 +44,10 @@ const PaginaLotes = () => {
     };
   }, []);
 
-  // ✅ OPTIMIZACIÓN 2: Cargar animales solo cuando se expande un lote (lazy loading)
-  const cargarAnimalesDelLote = useCallback(async (loteId) => {
-    // Si ya están cargados, no volver a cargarlos
-    if (animalesPorLote[loteId]) {
-      return;
-    }
-
-    // Si ya se están cargando, no iniciar otra carga
-    if (cargandoAnimales[loteId]) {
-      return;
-    }
-
-    setCargandoAnimales(prev => ({ ...prev, [loteId]: true }));
-
-    try {
-      const animales = await obtenerAnimalesDelLote(loteId);
-      const animalesOrdenados = ordenarPorCaravana(animales);
-      
-      setAnimalesPorLote(prev => ({
-        ...prev,
-        [loteId]: animalesOrdenados
-      }));
-    } catch (err) {
-      console.error(`Error cargando animales del lote ${loteId}:`, err);
-      setError(err);
-    } finally {
-      setCargandoAnimales(prev => ({ ...prev, [loteId]: false }));
-    }
-  }, [animalesPorLote, cargandoAnimales]);
-
-  // ✅ OPTIMIZACIÓN 3: Cargar animales cuando se expande el lote
-  const abrirLote = useCallback((lote) => {
-    const nuevoEstado = loteExpandidoId === lote.id ? null : lote.id;
-    setLoteExpandidoId(nuevoEstado);
+  const abrirLote = (lote) => {
+    setLoteExpandidoId((prev) => (prev === lote.id ? null : lote.id));
     setMenuAbierto(false);
-
-    // Si estamos expandiendo un lote (no cerrándolo), cargar sus animales
-    if (nuevoEstado !== null) {
-      cargarAnimalesDelLote(nuevoEstado);
-    }
-  }, [loteExpandidoId, cargarAnimalesDelLote]);
+  };
 
   const nuevoLote = async () => {
     try {
@@ -92,8 +63,7 @@ const PaginaLotes = () => {
     }
   };
 
-  // ✅ OPTIMIZACIÓN 4: Calcular resumen solo con datos disponibles
-  const calcularResumen = useCallback((lote, animales = []) => {
+  const calcularResumen = (lote, animales = []) => {
     const cc = animales.length || lote.cantidad_animales || 0;
     const gdps = animales.map((animal) => Number(animal.gdp)).filter((gdp) => Number.isFinite(gdp));
     const gdpPromedio = gdps.length ? (gdps.reduce((acc, value) => acc + value, 0) / gdps.length) : null;
@@ -103,7 +73,7 @@ const PaginaLotes = () => {
       .sort((a, b) => new Date(b) - new Date(a))[0] || lote.updated_at || lote.actualizado_en || lote.creado_en || lote.created_at;
 
     return { cc, gdpPromedio, ultimaFecha };
-  }, []);
+  };
 
   const textoSelector = useMemo(() => {
     if (!loteExpandidoId) return 'Seleccionar lote';
@@ -152,7 +122,6 @@ const PaginaLotes = () => {
       <div className="space-y-3">
         {lotes.map((lote) => {
           const animales = animalesPorLote[lote.id] || [];
-          const estaCargando = cargandoAnimales[lote.id];
           const resumen = calcularResumen(lote, animales);
           const loteExpandido = loteExpandidoId === lote.id;
           const vistaCorta = animales.slice(0, 4).map((animal) => animal.caravana).filter(Boolean);
@@ -178,21 +147,10 @@ const PaginaLotes = () => {
 
               {loteExpandido && (
                 <>
-                  {estaCargando ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="flex items-center gap-2">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                        <span className="text-gray-600">Cargando animales...</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <ListadoAnimalesLote lote={lote} animales={animales} />
-                      <div className="flex justify-end">
-                        <button className="px-2 py-1 border rounded" onClick={() => exportarLoteExcel(lote.id)}>Excel SENASA</button>
-                      </div>
-                    </>
-                  )}
+                  <ListadoAnimalesLote lote={lote} animales={animales} />
+                  <div className="flex justify-end">
+                    <button className="px-2 py-1 border rounded" onClick={() => exportarLoteExcel(lote.id)}>Excel SENASA</button>
+                  </div>
                 </>
               )}
             </div>
