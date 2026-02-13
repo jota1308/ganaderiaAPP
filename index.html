@@ -1380,6 +1380,8 @@
     function LoteDetail({ loteId, token, onBack, onSelectAnimal, animales, getAnimalImage }) {
       const [lote, setLote] = useState(null);
       const [loading, setLoading] = useState(true);
+      const chartRef = useRef(null);
+      const chartInstance = useRef(null);
 
       useEffect(() => {
         let cancelled = false;
@@ -1409,10 +1411,92 @@
         : (animales || []).filter((a) => String(a.lote_id) === String(loteId));
       const cantidadAnimales = animalesDelLote.length > 0 ? animalesDelLote.length : (lote.cantidad_animales ?? 0);
 
+      const pesos = animalesDelLote
+        .map((a) => parseFloat(a.peso_actual))
+        .filter((v) => !Number.isNaN(v));
+      const pesoPromedio = pesos.length ? (pesos.reduce((acc, v) => acc + v, 0) / pesos.length).toFixed(1) : null;
+      const pesoMin = pesos.length ? Math.min(...pesos) : null;
+      const pesoMax = pesos.length ? Math.max(...pesos) : null;
+
+      useEffect(() => {
+        if (!chartRef.current) return;
+        if (chartInstance.current) chartInstance.current.destroy();
+
+        const labels = animalesDelLote.map((a) => a.nombre || a.caravana || `Animal ${a.id}`);
+        const data = animalesDelLote.map((a) => {
+          const n = parseFloat(a.peso_actual);
+          return Number.isNaN(n) ? 0 : n;
+        });
+
+        if (labels.length === 0) return;
+
+        const ctx = chartRef.current.getContext('2d');
+        chartInstance.current = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Peso actual (kg)',
+              data,
+              backgroundColor: 'rgba(46, 125, 50, 0.35)',
+              borderColor: '#2e7d32',
+              borderWidth: 1,
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, position: 'top' } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+
+        return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+      }, [loteId, animalesDelLote]);
+
       return (
         <div>
           <h2 style={{ fontSize: 24, marginBottom: 8 }}>{lote.nombre}</h2>
           <p style={{ color: '#666', marginBottom: 24 }}>{lote.ubicacion || '—'} · {cantidadAnimales} animales</p>
+
+          <div className="stats-grid" style={{ marginBottom: 24 }}>
+            <div className="stat-card">
+              <div className="stat-value">{cantidadAnimales}</div>
+              <div className="stat-label">Animales en lote</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{pesoPromedio ? `${pesoPromedio} kg` : '—'}</div>
+              <div className="stat-label">Peso promedio</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{pesoMin != null ? `${pesoMin} kg` : '—'}</div>
+              <div className="stat-label">Peso mínimo</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{pesoMax != null ? `${pesoMax} kg` : '—'}</div>
+              <div className="stat-label">Peso máximo</div>
+            </div>
+          </div>
+
+          <div className="chart-container" style={{ marginBottom: 20 }}>
+            <div className="chart-title">Estadísticas del lote</div>
+            {animalesDelLote.length > 0 ? (
+              <div style={{ height: 280 }}>
+                <canvas ref={chartRef}></canvas>
+              </div>
+            ) : (
+              <p style={{ color: '#999' }}>Sin datos de peso para graficar este lote.</p>
+            )}
+          </div>
+
+          <div className="chart-container" style={{ marginBottom: 20 }}>
+            <div className="chart-title">Funciones Python del lote</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: análisis de crecimiento (pendiente de endpoint).')}>🐍 Análisis crecimiento lote</button>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: proyección de peso (pendiente de endpoint).')}>🐍 Proyección de lote</button>
+              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: reporte avanzado (pendiente de endpoint).')}>🐍 Reporte lote</button>
+            </div>
+          </div>
 
           {animalesDelLote.length > 0 ? (
             <div className="animals-grid">
@@ -1894,51 +1978,6 @@
             <p style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Haz clic en una fila para ver el listado de animales del lote.</p>
           )}
 
-          <div className="chart-container">
-            <div className="chart-title">Funciones Python</div>
-            <p style={{ color: '#666', marginBottom: 12 }}>Accesos rápidos a las utilidades Python solicitadas.</p>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: análisis de crecimiento (pendiente de integración de endpoint).')}>🐍 Análisis de crecimiento</button>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: proyección de peso (pendiente de integración de endpoint).')}>🐍 Proyección de peso</button>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python: reporte avanzado (pendiente de integración de endpoint).')}>🐍 Reporte avanzado</button>
-            </div>
-          </div>
-        </>
-      );
-    }
-
-    // ==================== TAB AJUSTES ====================
-    function AjustesTab({ usuario, token, lotes, onRefresh }) {
-      const [nuevoLote, setNuevoLote] = useState({ nombre: '', ubicacion: '' });
-      const [guardandoLote, setGuardandoLote] = useState(false);
-      const [msgLote, setMsgLote] = useState('');
-
-      const crearLote = async (e) => {
-        e.preventDefault();
-        if (!nuevoLote.nombre.trim()) return;
-        setGuardandoLote(true);
-        setMsgLote('');
-        try {
-          const res = await fetch(`${API_URL}/lotes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify(nuevoLote),
-          });
-          const data = await res.json();
-          if (res.ok) {
-            setMsgLote('Lote creado correctamente.');
-            setNuevoLote({ nombre: '', ubicacion: '' });
-            onRefresh();
-          } else setMsgLote(data.error || 'Error');
-        } catch (e) { setMsgLote('Error de conexión'); }
-        setGuardandoLote(false);
-      };
-
-      return (
-        <>
-          <div className="section-header">
-            <h2 className="section-title">Ajustes</h2>
-          </div>
 
           <div className="chart-container">
             <div className="chart-title">Cuenta</div>
