@@ -9,7 +9,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar dependencias
-RUN npm ci --only=production
+RUN npm install
+#RUN npm ci --only=production
+
 
 # ==========================================
 # Stage 2: Production
