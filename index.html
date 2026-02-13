@@ -1384,6 +1384,8 @@
     function LoteDetail({ loteId, token, onBack, onSelectAnimal, animales, getAnimalImage }) {
       const [lote, setLote] = useState(null);
       const [loading, setLoading] = useState(true);
+      const [errorApi, setErrorApi] = useState('');
+      const [pythonOutput, setPythonOutput] = useState(null);
       const chartRef = useRef(null);
       const chartInstance = useRef(null);
 
@@ -1420,6 +1422,66 @@
       const pesoPromedio = pesos.length ? (pesos.reduce((acc, v) => acc + v, 0) / pesos.length).toFixed(1) : null;
       const pesoMin = pesos.length ? Math.min(...pesos) : null;
       const pesoMax = pesos.length ? Math.max(...pesos) : null;
+
+      const ejecutarAnalisisLote = (tipo) => {
+        if (!animalesDelLote.length) {
+          setPythonOutput({ titulo: 'Sin datos disponibles', subtitulo: 'El lote no tiene animales activos para analizar.', items: [] });
+          return;
+        }
+
+        const datosOrdenados = animalesDelLote
+          .map((a) => ({ ...a, pesoNum: parseFloat(a.peso_actual), pesoNacimientoNum: parseFloat(a.peso_nacimiento) }))
+          .filter((a) => !Number.isNaN(a.pesoNum));
+
+        if (!datosOrdenados.length) {
+          setPythonOutput({ titulo: 'Sin pesajes válidos', subtitulo: 'Registra pesos para habilitar las funciones avanzadas del lote.', items: [] });
+          return;
+        }
+
+        if (tipo === 'crecimiento') {
+          const ranking = [...datosOrdenados]
+            .sort((a, b) => b.pesoNum - a.pesoNum)
+            .slice(0, 5)
+            .map((a, idx) => `${idx + 1}. ${a.nombre || a.caravana}: ${a.pesoNum.toFixed(1)} kg`);
+          setPythonOutput({ titulo: 'Análisis de crecimiento del lote', subtitulo: `Top ${ranking.length} animales por peso actual.`, items: ranking });
+          return;
+        }
+
+        if (tipo === 'proyeccion') {
+          const promedioActual = datosOrdenados.reduce((acc, a) => acc + a.pesoNum, 0) / datosOrdenados.length;
+          const conNacimiento = datosOrdenados.filter((a) => !Number.isNaN(a.pesoNacimientoNum));
+          const promedioNacimiento = conNacimiento.length
+            ? conNacimiento.reduce((acc, a) => acc + a.pesoNacimientoNum, 0) / conNacimiento.length
+            : null;
+          const crecimientoBase = promedioNacimiento ? Math.max((promedioActual - promedioNacimiento) / 180, 0.25) : 0.65;
+          const proyeccion30d = promedioActual + (crecimientoBase * 30);
+          setPythonOutput({
+            titulo: 'Proyección de peso del lote',
+            subtitulo: 'Estimación simple a 30 días basada en crecimiento promedio.',
+            items: [
+              `Peso promedio actual: ${promedioActual.toFixed(1)} kg`,
+              `Ganancia diaria estimada: ${crecimientoBase.toFixed(2)} kg/día`,
+              `Proyección promedio a 30 días: ${proyeccion30d.toFixed(1)} kg`,
+            ],
+          });
+          return;
+        }
+
+        const animalesCriticos = [...datosOrdenados]
+          .sort((a, b) => a.pesoNum - b.pesoNum)
+          .slice(0, 3)
+          .map((a) => `${a.nombre || a.caravana} (${a.pesoNum.toFixed(1)} kg)`);
+        setPythonOutput({
+          titulo: 'Reporte rápido del lote',
+          subtitulo: `Resumen de ${datosOrdenados.length} animales con peso registrado.`,
+          items: [
+            `Peso mínimo: ${pesoMin != null ? `${pesoMin.toFixed(1)} kg` : '—'}`,
+            `Peso máximo: ${pesoMax != null ? `${pesoMax.toFixed(1)} kg` : '—'}`,
+            `Peso promedio: ${pesoPromedio ? `${pesoPromedio} kg` : '—'}`,
+            `Animales a monitorear: ${animalesCriticos.length ? animalesCriticos.join(', ') : 'No hay alertas'}`,
+          ],
+        });
+      };
 
       useEffect(() => {
         if (!chartRef.current) return;
@@ -1496,10 +1558,24 @@
           <div className="chart-container" style={{ marginBottom: 20 }}>
             <div className="chart-title">Funciones Python del lote</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: análisis de crecimiento (pendiente de endpoint).')}>🐍 Análisis crecimiento lote</button>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: proyección de peso (pendiente de endpoint).')}>🐍 Proyección de lote</button>
-              <button type="button" className="btn btn-secondary" onClick={() => window.alert('Función Python por lote: reporte avanzado (pendiente de endpoint).')}>🐍 Reporte lote</button>
+              <button type="button" className="btn btn-secondary" onClick={() => ejecutarAnalisisLote('crecimiento')}>🐍 Análisis crecimiento lote</button>
+              <button type="button" className="btn btn-secondary" onClick={() => ejecutarAnalisisLote('proyeccion')}>🐍 Proyección de lote</button>
+              <button type="button" className="btn btn-secondary" onClick={() => ejecutarAnalisisLote('reporte')}>🐍 Reporte lote</button>
             </div>
+
+            {pythonOutput && (
+              <div style={{ marginTop: 16, background: '#f9fbf8', border: '1px solid #d8e7d5', borderRadius: 8, padding: 14 }}>
+                <div style={{ fontWeight: 700, color: '#2e7d32', marginBottom: 4 }}>{pythonOutput.titulo}</div>
+                <div style={{ color: '#666', marginBottom: pythonOutput.items.length ? 8 : 0 }}>{pythonOutput.subtitulo}</div>
+                {pythonOutput.items.length > 0 && (
+                  <ul style={{ paddingLeft: 18, color: '#333', margin: 0 }}>
+                    {pythonOutput.items.map((item, idx) => (
+                      <li key={`${item}-${idx}`} style={{ marginBottom: 6 }}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
 
           {animalesDelLote.length > 0 ? (
