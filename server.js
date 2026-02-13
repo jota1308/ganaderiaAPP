@@ -480,18 +480,34 @@ app.put('/api/animales/:id', verificarToken, (req, res) => {
   const { id } = req.params;
   const { nombre, raza, potrero, estado, foto_url, lote_id } = req.body;
 
-  if (!lote_id) {
-    return res.status(400).json({ error: 'Todo animal debe tener un lote asignado' });
-  }
+  db.get('SELECT lote_id FROM animales WHERE id = ? AND usuario_id = ?', [id, req.usuarioId], (errAnimal, animal) => {
+    if (errAnimal) return res.status(500).json({ error: errAnimal.message });
+    if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
 
-  db.run(`UPDATE animales SET nombre = ?, raza = ?, potrero = ?, estado = ?, foto_url = ?, lote_id = ? WHERE id = ? AND usuario_id = ?`,
-    [nombre, raza, potrero, estado, foto_url || null, lote_id, id, req.usuarioId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: 'Animal no encontrado' });
-      res.json({ mensaje: 'Animal actualizado' });
+    const actualizarAnimal = (loteAsignado) => {
+      if (!loteAsignado) {
+        return res.status(400).json({ error: 'Todo animal debe tener un lote asignado' });
+      }
+
+      db.run(`UPDATE animales SET nombre = ?, raza = ?, potrero = ?, estado = ?, foto_url = ?, lote_id = ? WHERE id = ? AND usuario_id = ?`,
+        [nombre, raza, potrero, estado, foto_url || null, loteAsignado, id, req.usuarioId],
+        function(err) {
+          if (err) return res.status(500).json({ error: err.message });
+          if (this.changes === 0) return res.status(404).json({ error: 'Animal no encontrado' });
+          res.json({ mensaje: 'Animal actualizado' });
+        }
+      );
+    };
+
+    if (lote_id || animal.lote_id) {
+      return actualizarAnimal(lote_id || animal.lote_id);
     }
-  );
+
+    return obtenerOCrearLoteSinAsignar(req.usuarioId, (errLote, loteDefaultId) => {
+      if (errLote) return res.status(500).json({ error: errLote.message });
+      return actualizarAnimal(loteDefaultId);
+    });
+  });
 });
 
 // ==================== RUTAS DE PESAJES ====================
