@@ -165,17 +165,34 @@ db.serialize(() => {
   const columnasLotesEsperadas = [
     ['descripcion', 'TEXT'],
     ['capacidad_maxima', 'INTEGER'],
-    ['fecha_creacion', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
+    // SQLite no permite agregar columnas con defaults no constantes vía ALTER TABLE
+    ['fecha_creacion', 'DATETIME'],
     ["estado", "TEXT DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo', 'cerrado'))"],
-    ['created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
-    ['updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
+    ['created_at', 'DATETIME'],
+    ['updated_at', 'DATETIME'],
   ];
 
   db.all('PRAGMA table_info(lotes)', [], (_err, columnasLotes = []) => {
     columnasLotesEsperadas.forEach(([nombreColumna, tipo]) => {
       const existe = columnasLotes.some((c) => c.name === nombreColumna);
       if (!existe) {
-        db.run(`ALTER TABLE lotes ADD COLUMN ${nombreColumna} ${tipo}`);
+        db.run(`ALTER TABLE lotes ADD COLUMN ${nombreColumna} ${tipo}`, (alterErr) => {
+          if (alterErr) {
+            console.error(`⚠️ Error en migración de lotes al agregar ${nombreColumna}:`, alterErr.message);
+            return;
+          }
+
+          if (['fecha_creacion', 'created_at', 'updated_at'].includes(nombreColumna)) {
+            db.run(
+              `UPDATE lotes SET ${nombreColumna} = COALESCE(${nombreColumna}, CURRENT_TIMESTAMP)`,
+              (updateErr) => {
+                if (updateErr) {
+                  console.error(`⚠️ Error al backfillear ${nombreColumna} en lotes:`, updateErr.message);
+                }
+              }
+            );
+          }
+        });
       }
     });
   });
