@@ -37,6 +37,27 @@ const db = new sqlite3.Database(dbPath, (err) => {
   console.log(`✅ Base de datos conectada: ${dbPath}`);
 });
 
+const obtenerOCrearLoteSinAsignar = (usuarioId, callback) => {
+  db.get(
+    'SELECT id FROM lotes WHERE usuario_id = ? AND nombre = ? LIMIT 1',
+    [usuarioId, 'Sin asignar'],
+    (err, lote) => {
+      if (err) return callback(err);
+      if (lote) return callback(null, lote.id);
+
+      db.run(
+        `INSERT INTO lotes (usuario_id, nombre, descripcion, ubicacion, capacidad_maxima, estado)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [usuarioId, 'Sin asignar', 'Lote por defecto para animales sin asignación explícita', 'General', 99999, 'activo'],
+        function (insertErr) {
+          if (insertErr) return callback(insertErr);
+          return callback(null, this.lastID);
+        }
+      );
+    }
+  );
+};
+
 // Inicializar base de datos
 db.serialize(() => {
   // Tabla de usuarios/campos
@@ -106,10 +127,28 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER NOT NULL,
     nombre TEXT NOT NULL,
+    descripcion TEXT,
     ubicacion TEXT,
+    capacidad_maxima INTEGER,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    estado TEXT DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo', 'cerrado')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     creado_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(usuario_id, nombre),
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
   )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS historial_lotes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    animal_id INTEGER REFERENCES animales(id) ON DELETE CASCADE,
+    lote_anterior_id INTEGER REFERENCES lotes(id),
+    lote_nuevo_id INTEGER REFERENCES lotes(id),
+    fecha_cambio DATETIME DEFAULT CURRENT_TIMESTAMP,
+    usuario TEXT,
+    motivo TEXT
+  )`);
+  db.run('CREATE INDEX IF NOT EXISTS idx_historial_animal ON historial_lotes(animal_id)');
 
   // Historial de búsquedas por caravana
   db.run(`CREATE TABLE IF NOT EXISTS busquedas_recientes (
@@ -122,6 +161,32 @@ db.serialize(() => {
     FOREIGN KEY (animal_id) REFERENCES animales(id)
   )`);
 
+  // Migraciones: lotes y relación con animales
+  const columnasLotesEsperadas = [
+    ['descripcion', 'TEXT'],
+    ['capacidad_maxima', 'INTEGER'],
+    ['fecha_creacion', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
+    ["estado", "TEXT DEFAULT 'activo' CHECK (estado IN ('activo', 'inactivo', 'cerrado'))"],
+    ['created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
+    ['updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'],
+  ];
+
+  db.all('PRAGMA table_info(lotes)', [], (_err, columnasLotes = []) => {
+    columnasLotesEsperadas.forEach(([nombreColumna, tipo]) => {
+      const existe = columnasLotes.some((c) => c.name === nombreColumna);
+      if (!existe) {
+        db.run(`ALTER TABLE lotes ADD COLUMN ${nombreColumna} ${tipo}`);
+      }
+    });
+  });
+
+  db.run(`CREATE TRIGGER IF NOT EXISTS trg_lotes_updated_at
+    AFTER UPDATE ON lotes
+    FOR EACH ROW
+    BEGIN
+      UPDATE lotes SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END`);
+
   // Migración: agregar columna lote_id en animales si no existe
   db.all(`PRAGMA table_info(animales)`, [], (err, columnas = []) => {
     if (err) return;
@@ -129,6 +194,35 @@ db.serialize(() => {
     if (!tieneLoteId) {
       db.run('ALTER TABLE animales ADD COLUMN lote_id INTEGER REFERENCES lotes(id)');
     }
+
+    db.run('CREATE INDEX IF NOT EXISTS idx_animales_lote ON animales(lote_id)');
+
+    db.run(`CREATE TRIGGER IF NOT EXISTS trg_animales_lote_no_nulo_insert
+      BEFORE INSERT ON animales
+      FOR EACH ROW
+      WHEN NEW.lote_id IS NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'Todo animal debe tener lote asignado');
+      END`);
+
+    db.run(`CREATE TRIGGER IF NOT EXISTS trg_animales_lote_no_nulo_update
+      BEFORE UPDATE OF lote_id ON animales
+      FOR EACH ROW
+      WHEN NEW.lote_id IS NULL
+      BEGIN
+        SELECT RAISE(ABORT, 'Todo animal debe tener lote asignado');
+      END`);
+  });
+
+
+  db.all('SELECT id FROM usuarios', [], (_eUsers, usuarios = []) => {
+    usuarios.forEach((u) => {
+      obtenerOCrearLoteSinAsignar(u.id, (_eLote, loteId) => {
+        if (!_eLote && loteId) {
+          db.run('UPDATE animales SET lote_id = ? WHERE usuario_id = ? AND (lote_id IS NULL OR lote_id = 0)', [loteId, u.id]);
+        }
+      });
+    });
   });
 
   // Verificar si existe usuario demo
@@ -139,19 +233,22 @@ db.serialize(() => {
       db.run(`INSERT INTO usuarios (email, password, nombre_campo) VALUES (?, ?, ?)`,
         ['demo@campo.com', passwordHash, 'Estancia Los Álamos']);
 
-      // Crear animales demo
-      const animalesDemo = [
-        ['ARG001234567890', 1, 'Margarita', 'Aberdeen Angus', 'hembra', '2022-03-15', 35, null, null, 'Potrero Norte', 'activo'],
-        ['ARG001234567891', 1, 'Tornado', 'Hereford', 'macho', '2021-08-20', 40, null, null, 'Potrero Sur', 'activo'],
-        ['ARG001234567892', 1, 'Luna', 'Brangus', 'hembra', '2023-01-10', 32, 'ARG001234567890', null, 'Potrero Norte', 'activo'],
-      ];
+      db.run(`INSERT INTO lotes (usuario_id, nombre, ubicacion, descripcion, capacidad_maxima, estado)
+              VALUES (1, 'Lote Demo Norte', 'Sector Norte', 'Lote inicial demo', 50, 'activo')`, function () {
+        const loteDemoId = this.lastID;
 
-      animalesDemo.forEach(animal => {
-        db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, estado) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, animal);
+        // Crear animales demo
+        const animalesDemo = [
+          ['ARG001234567890', 1, 'Margarita', 'Aberdeen Angus', 'hembra', '2022-03-15', 35, null, null, 'Potrero Norte', 'activo', loteDemoId],
+          ['ARG001234567891', 1, 'Tornado', 'Hereford', 'macho', '2021-08-20', 40, null, null, 'Potrero Sur', 'activo', loteDemoId],
+          ['ARG001234567892', 1, 'Luna', 'Brangus', 'hembra', '2023-01-10', 32, 'ARG001234567890', null, 'Potrero Norte', 'activo', loteDemoId],
+        ];
+
+        animalesDemo.forEach(animal => {
+          db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, estado, lote_id) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, animal);
+        });
       });
-
-      db.run(`INSERT INTO lotes (usuario_id, nombre, ubicacion) VALUES (1, 'Lote Demo Norte', 'Sector Norte')`);
 
       // Crear pesajes demo
       db.run(`INSERT INTO pesajes (animal_id, peso, fecha, notas) VALUES (1, 450, '2024-12-01', 'Peso estable')`);
@@ -337,17 +434,28 @@ app.post('/api/animales', verificarToken, (req, res) => {
     return res.status(400).json({ error: 'Sexo inválido. Debe ser hembra o macho' });
   }
 
-  db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [caravana, req.usuarioId, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero],
-    function(err) {
-      if (err) return res.status(400).json({ error: 'Caravana ya registrada o datos inválidos' });
-      
-      db.get('SELECT * FROM animales WHERE id = ?', [this.lastID], (err, animal) => {
-        res.json(animal);
-      });
-    }
-  );
+  const insertarAnimal = (loteAsignadoId) => {
+    db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, lote_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [caravana, req.usuarioId, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, loteAsignadoId],
+      function(err) {
+        if (err) return res.status(400).json({ error: 'Caravana ya registrada o datos inválidos' });
+
+        db.get('SELECT * FROM animales WHERE id = ?', [this.lastID], (_err, animal) => {
+          res.json(animal);
+        });
+      }
+    );
+  };
+
+  if (lote_id) {
+    return insertarAnimal(lote_id);
+  }
+
+  return obtenerOCrearLoteSinAsignar(req.usuarioId, (errLote, loteDefaultId) => {
+    if (errLote) return res.status(500).json({ error: errLote.message });
+    return insertarAnimal(loteDefaultId);
+  });
 });
 
 // Actualizar animal
@@ -355,8 +463,12 @@ app.put('/api/animales/:id', verificarToken, (req, res) => {
   const { id } = req.params;
   const { nombre, raza, potrero, estado, foto_url, lote_id } = req.body;
 
+  if (!lote_id) {
+    return res.status(400).json({ error: 'Todo animal debe tener un lote asignado' });
+  }
+
   db.run(`UPDATE animales SET nombre = ?, raza = ?, potrero = ?, estado = ?, foto_url = ?, lote_id = ? WHERE id = ? AND usuario_id = ?`,
-    [nombre, raza, potrero, estado, foto_url || null, lote_id || null, id, req.usuarioId],
+    [nombre, raza, potrero, estado, foto_url || null, lote_id, id, req.usuarioId],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       if (this.changes === 0) return res.status(404).json({ error: 'Animal no encontrado' });
@@ -477,12 +589,18 @@ app.get('/api/busquedas-recientes', verificarToken, (req, res) => {
 
 // Obtener lotes del usuario
 app.get('/api/lotes', verificarToken, (req, res) => {
-  db.all(`SELECT l.*, COUNT(a.id) as cantidad_animales
+  db.all(`SELECT l.*, 
+            COUNT(a.id) as cantidad_animales,
+            COALESCE(l.capacidad_maxima, 0) as capacidad_maxima,
+            CASE WHEN COALESCE(l.capacidad_maxima, 0) > 0 
+              THEN ROUND((COUNT(a.id) * 100.0) / l.capacidad_maxima, 2)
+              ELSE 0
+            END as porcentaje_ocupacion
           FROM lotes l
           LEFT JOIN animales a ON a.lote_id = l.id AND a.usuario_id = l.usuario_id AND a.estado = 'activo'
           WHERE l.usuario_id = ?
           GROUP BY l.id
-          ORDER BY l.creado_en DESC`,
+          ORDER BY l.created_at DESC, l.creado_en DESC`,
     [req.usuarioId],
     (err, lotes) => {
       if (err) return res.status(500).json({ error: err.message });
@@ -505,7 +623,8 @@ app.get('/api/lotes/:id', verificarToken, (req, res) => {
       if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
 
       db.all(`SELECT a.*,
-              (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual
+              (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual,
+              (SELECT fecha FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as fecha_ultimo_peso
               FROM animales a
               WHERE a.usuario_id = ? AND a.lote_id = ? AND a.estado = 'activo'
               ORDER BY a.creado_en DESC`,
@@ -521,18 +640,121 @@ app.get('/api/lotes/:id', verificarToken, (req, res) => {
   );
 });
 
+// Obtener animales de un lote
+app.get('/api/lotes/:id/animales', verificarToken, (req, res) => {
+  const { id } = req.params;
+  db.all(`SELECT a.*, 
+            (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual,
+            (SELECT fecha FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as fecha_ultimo_peso
+          FROM animales a
+          WHERE a.usuario_id = ? AND a.lote_id = ? AND a.estado = 'activo'
+          ORDER BY a.caravana ASC`,
+  [req.usuarioId, id],
+  (err, animales) => {
+    if (err) return res.status(500).json({ error: err.message });
+    return res.json(animales || []);
+  });
+});
+
+// Exportar lote a Excel (o CSV si no hay dependencia xlsx)
+app.get('/api/lotes/:id/export/excel', verificarToken, (req, res) => {
+  const { id } = req.params;
+
+  db.get('SELECT * FROM lotes WHERE id = ? AND usuario_id = ?', [id, req.usuarioId], (errLote, lote) => {
+    if (errLote) return res.status(500).json({ error: errLote.message });
+    if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
+
+    db.all(`SELECT a.*, 
+              (SELECT peso FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as peso_actual,
+              (SELECT fecha FROM pesajes WHERE animal_id = a.id ORDER BY fecha DESC LIMIT 1) as fecha_ultimo_peso
+            FROM animales a
+            WHERE a.usuario_id = ? AND a.lote_id = ? AND a.estado = 'activo'`,
+      [req.usuarioId, id],
+      (errAnimales, animales = []) => {
+        if (errAnimales) return res.status(500).json({ error: errAnimales.message });
+
+        const rows = animales.map((animal) => ({
+          'N° Caravana Visual': animal.caravana,
+          'N° Chip Electrónico': animal.caravana,
+          'Categoría': animal.sexo === 'macho' ? 'Novillo' : 'Vaquillona',
+          'Raza': animal.raza || 'N/A',
+          'Peso (kg)': animal.peso_actual || 'N/A',
+          'Fecha Último Pesaje': animal.fecha_ultimo_peso || '',
+          'Establecimiento': 'Establecimiento Demo',
+          Lote: lote.nombre
+        }));
+
+        let XLSX;
+        try {
+          XLSX = require('xlsx');
+        } catch (_errorXlsx) {
+          const csvHeaders = Object.keys(rows[0] || {
+            'N° Caravana Visual': '', 'N° Chip Electrónico': '', Categoría: '', Raza: '', 'Peso (kg)': '', 'Fecha Último Pesaje': '', Establecimiento: '', Lote: ''
+          });
+          const csvLines = [csvHeaders.join(',')].concat(rows.map((row) => csvHeaders.map((h) => `"${String(row[h] ?? '').replace(/"/g, '""')}"`).join(',')));
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename=lote_${lote.nombre.replace(/\s+/g, '_')}.csv`);
+          return res.send(csvLines.join('\n'));
+        }
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'SENASA');
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename=lote_${lote.nombre.replace(/\s+/g, '_')}.xlsx`);
+        return res.send(buffer);
+      });
+  });
+});
+
 // Crear lote
 app.post('/api/lotes', verificarToken, (req, res) => {
-  const { nombre, ubicacion } = req.body;
+  const { nombre, ubicacion, descripcion, capacidad_maxima, estado } = req.body;
   if (!nombre || !nombre.trim()) return res.status(400).json({ error: 'El nombre es obligatorio' });
 
-  db.run('INSERT INTO lotes (usuario_id, nombre, ubicacion) VALUES (?, ?, ?)',
-    [req.usuarioId, nombre.trim(), ubicacion || null],
+  db.run(
+    `INSERT INTO lotes (usuario_id, nombre, ubicacion, descripcion, capacidad_maxima, estado)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [req.usuarioId, nombre.trim(), ubicacion || null, descripcion || null, capacidad_maxima || null, estado || 'activo'],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       db.get('SELECT * FROM lotes WHERE id = ?', [this.lastID], (_errLote, lote) => res.json(lote));
     }
   );
+});
+
+// Asignar/cambiar animal de lote + historial
+app.put('/api/animales/:animalId/lote', verificarToken, (req, res) => {
+  const { animalId } = req.params;
+  const { lote_id, motivo } = req.body;
+
+  if (!lote_id) {
+    return res.status(400).json({ error: 'lote_id es obligatorio' });
+  }
+
+  db.get('SELECT * FROM animales WHERE id = ? AND usuario_id = ?', [animalId, req.usuarioId], (errAnimal, animal) => {
+    if (errAnimal) return res.status(500).json({ error: errAnimal.message });
+    if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
+
+    db.get('SELECT * FROM lotes WHERE id = ? AND usuario_id = ?', [lote_id, req.usuarioId], (errLote, lote) => {
+      if (errLote) return res.status(500).json({ error: errLote.message });
+      if (!lote) return res.status(404).json({ error: 'Lote no encontrado' });
+
+      db.run('UPDATE animales SET lote_id = ? WHERE id = ? AND usuario_id = ?', [lote_id, animalId, req.usuarioId], function (errUpdate) {
+        if (errUpdate) return res.status(500).json({ error: errUpdate.message });
+
+        db.run(`INSERT INTO historial_lotes (animal_id, lote_anterior_id, lote_nuevo_id, usuario, motivo)
+                VALUES (?, ?, ?, ?, ?)`,
+          [animalId, animal.lote_id || null, lote_id, String(req.usuarioId), motivo || 'Cambio manual de lote'],
+          (errHist) => {
+            if (errHist) return res.status(500).json({ error: errHist.message });
+            return res.json({ mensaje: 'Lote asignado correctamente' });
+          }
+        );
+      });
+    });
+  });
 });
 
 // ==================== RUTAS DE EVENTOS REPRODUCTIVOS ====================
