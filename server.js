@@ -16,6 +16,11 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 app.use(cors());
 app.use(express.json());
 
+// Health check
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 // Crear directorio de base de datos si no existe
 const dbDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dbDir)) {
