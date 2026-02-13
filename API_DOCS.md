@@ -78,7 +78,37 @@ Además, para sostener el contrato:
 
 ---
 
-## 4) Formato de errores (contrato)
+
+## ✅ Reglas de validación efectivas
+
+### POST /auth/login
+- `email` es obligatorio.
+- `password` es obligatorio.
+- Si falta alguno, responde **400**.
+
+### POST /auth/registro
+- `email`, `password` y `nombre_campo` son obligatorios.
+- `password` debe tener al menos 6 caracteres.
+- Si no cumple, responde **400**.
+
+### POST /animales
+- `caravana` es obligatoria.
+- `sexo` (si se envía) debe ser `hembra` o `macho`.
+- Si no cumple, responde **400**.
+
+### POST /pesajes
+- `animal_id` y `peso` son obligatorios.
+- `peso` debe ser mayor a 0.
+- Si no cumple, responde **400**.
+
+### POST /tratamientos
+- `animal_id`, `tipo` y `descripcion` son obligatorios.
+- `tipo` debe ser uno de: `vacuna`, `desparasitacion`, `antibiotico`, `vitamina`, `otro`.
+- Si no cumple, responde **400**.
+
+---
+
+## ❌ Códigos de Error
 
 Cuando una petición falla, backend responde:
 

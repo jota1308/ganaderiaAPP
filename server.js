@@ -190,6 +190,10 @@ const verificarToken = (req, res, next) => {
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
 
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email y password son obligatorios' });
+  }
+
   db.get('SELECT * FROM usuarios WHERE email = ?', [email], (err, usuario) => {
     if (err || !usuario) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
@@ -214,6 +218,15 @@ app.post('/api/auth/login', (req, res) => {
 // Registro
 app.post('/api/auth/registro', (req, res) => {
   const { email, password, nombre_campo } = req.body;
+
+  if (!email || !password || !nombre_campo) {
+    return res.status(400).json({ error: 'Email, password y nombre_campo son obligatorios' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+
   const passwordHash = bcrypt.hashSync(password, 10);
 
   db.run('INSERT INTO usuarios (email, password, nombre_campo) VALUES (?, ?, ?)',
@@ -316,9 +329,17 @@ app.get('/api/animales/:id', verificarToken, (req, res) => {
 app.post('/api/animales', verificarToken, (req, res) => {
   const { caravana, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, lote_id } = req.body;
 
-  db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, lote_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [caravana, req.usuarioId, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero, lote_id || null],
+  if (!caravana) {
+    return res.status(400).json({ error: 'La caravana es obligatoria' });
+  }
+
+  if (sexo && !['hembra', 'macho'].includes(sexo)) {
+    return res.status(400).json({ error: 'Sexo inválido. Debe ser hembra o macho' });
+  }
+
+  db.run(`INSERT INTO animales (caravana, usuario_id, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [caravana, req.usuarioId, nombre, raza, sexo, fecha_nacimiento, peso_nacimiento, madre_caravana, padre_caravana, potrero],
     function(err) {
       if (err) return res.status(400).json({ error: 'Caravana ya registrada o datos inválidos' });
       
@@ -350,6 +371,14 @@ app.put('/api/animales/:id', verificarToken, (req, res) => {
 app.post('/api/pesajes', verificarToken, (req, res) => {
   const { animal_id, peso, fecha, notas } = req.body;
 
+  if (!animal_id || peso === undefined || peso === null) {
+    return res.status(400).json({ error: 'animal_id y peso son obligatorios' });
+  }
+
+  if (Number(peso) <= 0) {
+    return res.status(400).json({ error: 'El peso debe ser mayor a 0' });
+  }
+
   // Verificar que el animal pertenece al usuario
   db.get('SELECT * FROM animales WHERE id = ? AND usuario_id = ?', [animal_id, req.usuarioId], (err, animal) => {
     if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
@@ -372,6 +401,16 @@ app.post('/api/pesajes', verificarToken, (req, res) => {
 // Registrar tratamiento
 app.post('/api/tratamientos', verificarToken, (req, res) => {
   const { animal_id, tipo, descripcion, fecha, proxima_fecha, veterinario, costo } = req.body;
+
+  const tiposValidos = ['vacuna', 'desparasitacion', 'antibiotico', 'vitamina', 'otro'];
+
+  if (!animal_id || !tipo || !descripcion) {
+    return res.status(400).json({ error: 'animal_id, tipo y descripcion son obligatorios' });
+  }
+
+  if (!tiposValidos.includes(tipo)) {
+    return res.status(400).json({ error: 'Tipo de tratamiento inválido' });
+  }
 
   db.get('SELECT * FROM animales WHERE id = ? AND usuario_id = ?', [animal_id, req.usuarioId], (err, animal) => {
     if (!animal) return res.status(404).json({ error: 'Animal no encontrado' });
@@ -545,11 +584,19 @@ app.get('/api/dashboard', verificarToken, (req, res) => {
   );
 });
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log('');
-  console.log('🚀 Backend corriendo en http://localhost:' + PORT);
-  console.log('📊 Usuario demo: demo@campo.com / demo123');
-  console.log('💾 Base de datos: ' + dbPath);
-  console.log('');
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Ruta no encontrada' });
 });
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('🚀 Backend corriendo en http://localhost:' + PORT);
+    console.log('📊 Usuario demo: demo@campo.com / demo123');
+    console.log('💾 Base de datos: ' + dbPath);
+    console.log('');
+  });
+}
+
+module.exports = app;
+module.exports.db = db;
